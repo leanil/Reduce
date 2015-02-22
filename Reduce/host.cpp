@@ -10,11 +10,15 @@
 #include <chrono>
 #include <algorithm>
 #include <numeric>
+#include <math.h>
 
 using namespace cl;
 
-int main() {
+unsigned round_up_div(unsigned a, unsigned b) {
+	return static_cast<int>(ceil((double)a / b));
+}
 
+int main() {
 	try {
 #pragma region Initialize GPU
 		// Get available platforms
@@ -81,50 +85,60 @@ int main() {
 		}
 
 		// Make kernel
-		Kernel kernel(program, "reduce");
+		Kernel kernel_0(program, "reduce"), kernel_1(program, "reduce");
 #pragma endregion
 
-		for (unsigned size = 1 << 23; size <= 1 << 28; size = size << 1) {
+		for (unsigned size = 1 << 20; size <= 1 << 27; size = size << 1) {
 			std::vector<int> input(size);
 			std::default_random_engine rand(0);
 			std::generate(input.begin(), input.end(), [&] () {return rand() % 512 - 256; });
 
+			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
+
 #pragma region Execute kernel
 			// Create memory buffers
-			Buffer input_buffer(context, CL_MEM_READ_WRITE, size * sizeof(int));
-			Buffer result_buffer(context, CL_MEM_READ_WRITE, sizeof(int));
+			Buffer io_buffer_0(context, CL_MEM_READ_WRITE, size * sizeof(int));
+			Buffer io_buffer_1(context, CL_MEM_READ_WRITE, size * sizeof(int));
 
-			int GPU_result = 0;
 			// Copy input to the memory buffer
-			queue.enqueueWriteBuffer(result_buffer, CL_TRUE, 0, sizeof(int), &GPU_result);
-			queue.enqueueWriteBuffer(input_buffer, CL_TRUE, 0, size * sizeof(int), input.data());
+			queue.enqueueWriteBuffer(io_buffer_0, CL_TRUE, 0, size * sizeof(int), input.data());
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 
-			// Set arguments to kernel
-			kernel.setArg(0, input_buffer);
-			kernel.setArg(1, result_buffer);
+			cl_ulong round = 0;
+			const unsigned GROUP_SIZE = 128;
 
-			// Run the kernel on specific ND range
-			Event operation;
-			queue.enqueueNDRangeKernel(kernel, cl::NullRange, size, cl::NullRange, nullptr, &operation);
+			kernel_0.setArg(0, io_buffer_0);
+			kernel_0.setArg(1, io_buffer_1);
+			kernel_0.setArg(2, GROUP_SIZE * sizeof(int), nullptr);
 
-			operation.wait();
-			cl_ulong device_start, device_end;
-			operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_START, &device_start);
-			operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_END, &device_end);
-			auto time = (device_end - device_start) / 1000000;
+			kernel_1.setArg(0, io_buffer_1);
+			kernel_1.setArg(1, io_buffer_0);
+			kernel_1.setArg(2, GROUP_SIZE * sizeof(int), nullptr);
+
+			auto start = std::chrono::high_resolution_clock::now();
+
+			for (unsigned rem_size = size; rem_size > 1; rem_size = round_up_div(rem_size, GROUP_SIZE), ++round) {			
+
+				// Run the kernel on specific ND range
+				int t1 = round_up_div(rem_size, GROUP_SIZE) * GROUP_SIZE;
+				queue.enqueueNDRangeKernel(round % 2 == 0 ? kernel_0 : kernel_1,
+					NullRange, t1, GROUP_SIZE);
+			}
+
+			queue.finish();
+			auto stop = std::chrono::high_resolution_clock::now();
+			auto time = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count();
 
 			// Read buffer into a local variable
-			queue.enqueueReadBuffer(result_buffer, CL_TRUE, 0, sizeof(int), &GPU_result);
+			int GPU_result;
+			queue.enqueueReadBuffer(round % 2 == 0 ? io_buffer_0 : io_buffer_1, CL_TRUE, 0, sizeof(int), &GPU_result);
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 #pragma endregion
 
 			std::cout << time << std::endl;
 
-			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
 			if (CPU_result != GPU_result) {
 				std::cerr << "computation error" << std::endl;
-				break;
 			}
 		}
 
