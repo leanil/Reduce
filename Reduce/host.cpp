@@ -84,38 +84,45 @@ int main() {
 		Kernel kernel(program, "reduce");
 #pragma endregion
 
-		for (unsigned size = 1 << 23; size <= 1 << 27; size = size << 1) {
+		for (unsigned size = 1 << 20; size <= 1 << 27; size = size << 1) {
 			std::vector<int> input(size);
 			std::default_random_engine rand(0);
 			std::generate(input.begin(), input.end(), [&] () {return rand() % 512 - 256; });
 
 #pragma region Execute kernel
 			// Create memory buffers
-			Buffer input_buffer(context, CL_MEM_READ_WRITE, size * sizeof(int));
-			Buffer result_buffer(context, CL_MEM_WRITE_ONLY, sizeof(int));
+			Buffer io_buffer(context, CL_MEM_READ_WRITE, size * sizeof(int));
+			Buffer offset_buffer(context, CL_MEM_READ_ONLY, sizeof(int));
 
-			int GPU_result = 0;
 			// Copy input to the memory buffer
-			queue.enqueueWriteBuffer(result_buffer, CL_TRUE, 0, sizeof(int), &GPU_result);
-			queue.enqueueWriteBuffer(input_buffer, CL_TRUE, 0, size * sizeof(int), input.data());
+			queue.enqueueWriteBuffer(io_buffer, CL_TRUE, 0, size * sizeof(int), input.data());
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
-
+			
 			// Set arguments to kernel
-			kernel.setArg(0, input_buffer);
-			kernel.setArg(1, result_buffer);
+			kernel.setArg(0, io_buffer);
+			kernel.setArg(1, io_buffer);
 
-			// Run the kernel on specific ND range
-			Event operation;
-			queue.enqueueNDRangeKernel(kernel, cl::NullRange, size, cl::NullRange, nullptr, &operation);
+			cl_ulong time = 0;
 
-			operation.wait();
-			cl_ulong device_start, device_end;
-			operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_START, &device_start);
-			operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_END, &device_end);
-			auto time = (device_end - device_start) / 1000000;
+			for (unsigned offset = 1; offset < size; offset = offset << 1) {
+
+				queue.enqueueWriteBuffer(offset_buffer, CL_TRUE, 0, sizeof(int), &offset);				
+				kernel.setArg(2, offset_buffer);
+
+				Event operation;
+				// Run the kernel on specific ND range
+				queue.enqueueNDRangeKernel(kernel, cl::NullRange, size, cl::NullRange, nullptr, &operation);
+
+				operation.wait();
+				cl_ulong device_start, device_end;
+				operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_START, &device_start);
+				operation.getProfilingInfo<cl_ulong>(CL_PROFILING_COMMAND_END, &device_end);
+				time += (device_end - device_start) / 1000000;
+			}
 
 			// Read buffer into a local variable
-			queue.enqueueReadBuffer(result_buffer, CL_TRUE, 0, sizeof(int), &GPU_result);
+			int GPU_result;
+			queue.enqueueReadBuffer(io_buffer, CL_TRUE, 0, sizeof(int), &GPU_result);
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 #pragma endregion
 

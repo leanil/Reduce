@@ -1,10 +1,9 @@
-__kernel void reduce(__global int* input, __global int* result) {
-	int n = get_global_size(0);
-	int x = get_global_id(0);
-	for (int offset = 1; offset < n; offset = offset << 1) {
-		if (x  % 2*offset == 0 && x + offset < n) {
-			input[x] += input[x + offset];
-		}
+__kernel void reduce(__global int* idata, __global int* odata, __global const int* offset) {
+	int id = get_global_id(0);
+	if (id % *offset == 0 && id + offset < get_global_size(0)) {
+		odata[id] = idata[id] + idata[id + *offset];
 	}
-	*result = input[0];
 }
+
+// id % (*offset*2) (logical error)
+// id + *offset		(programming mistake)
