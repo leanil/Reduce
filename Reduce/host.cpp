@@ -84,7 +84,7 @@ int main() {
 		Kernel kernel(program, "reduce");
 #pragma endregion
 
-		for (unsigned size = 1 << 23; size <= 1 << 28; size = size << 1) {
+		for (unsigned size = 1 << 23; size <= 1 << 27; size = size << 1) {
 			std::vector<int> input(size);
 			std::default_random_engine rand(0);
 			std::generate(input.begin(), input.end(), [&] () {return rand() % 512 - 256; });
@@ -92,7 +92,7 @@ int main() {
 #pragma region Execute kernel
 			// Create memory buffers
 			Buffer input_buffer(context, CL_MEM_READ_WRITE, size * sizeof(int));
-			Buffer result_buffer(context, CL_MEM_READ_WRITE, sizeof(int));
+			Buffer result_buffer(context, CL_MEM_WRITE_ONLY, sizeof(int));
 
 			int GPU_result = 0;
 			// Copy input to the memory buffer
@@ -124,7 +124,6 @@ int main() {
 			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
 			if (CPU_result != GPU_result) {
 				std::cerr << "computation error" << std::endl;
-				break;
 			}
 		}
 
