@@ -75,7 +75,7 @@ int main() {
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 
 			cl_ulong round = 0;
-			const unsigned GROUP_SIZE = 128;
+			const unsigned GROUP_SIZE = 1024;
 
 			kernel_0.setArg(0, io_buffer_0);
 			kernel_0.setArg(2, io_buffer_1);
@@ -87,18 +87,10 @@ int main() {
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (unsigned rem_size = size; rem_size > 1; rem_size = round_up_div(rem_size, GROUP_SIZE), ++round) {
+			kernel_0.setArg(1, size);
 
-				if (round % 2 == 0) {
-					kernel_0.setArg(1, rem_size);
-				}
-				else {
-					kernel_1.setArg(1, rem_size);
-				}
-				// Run the kernel on specific ND range
-				queue.enqueueNDRangeKernel(round % 2 == 0 ? kernel_0 : kernel_1,
-					NullRange, round_up_div(rem_size, GROUP_SIZE) * GROUP_SIZE, GROUP_SIZE);
-			}
+			// Run the kernel on specific ND range
+			queue.enqueueNDRangeKernel(kernel_0, NullRange, GROUP_SIZE, GROUP_SIZE);
 
 			queue.finish();
 			auto stop = std::chrono::high_resolution_clock::now();
@@ -106,7 +98,7 @@ int main() {
 
 			// Read buffer into a local variable
 			int GPU_result;
-			queue.enqueueReadBuffer(round % 2 == 0 ? io_buffer_0 : io_buffer_1, CL_TRUE, 0, sizeof(int), &GPU_result);
+			queue.enqueueReadBuffer(io_buffer_1, CL_TRUE, 0, sizeof(int), &GPU_result);
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 #pragma endregion
 
