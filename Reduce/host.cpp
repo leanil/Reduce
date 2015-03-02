@@ -13,67 +13,36 @@
 
 using namespace cl;
 
+#include <oclUtils.hpp>
+
 int main() {
 
 	try {
 #pragma region Initialize GPU
-		// Get available platforms
-		vector<Platform> platforms;
-		Platform::get(&platforms);
-
-		vector<Device> devices; // !
-		Context context; // !
-
-		// I prefer platforms with higher index
-		for (unsigned i = platforms.size() - 1; i >= 0; --i) {
-			try {
-				std::cout << platforms[i].getInfo<CL_PLATFORM_NAME>() << std::endl;
-				std::cout << platforms[i].getInfo<CL_PLATFORM_VERSION>() << std::endl;
-
-				// Select the default platform and create a context using this platform and the GPU
-				cl_context_properties cps[3] = {
-					CL_CONTEXT_PLATFORM,
-					(cl_context_properties)(platforms[i])(),
-					0
-				};
-
-				context = Context(CL_DEVICE_TYPE_GPU, cps);
-
-				// Get a list of devices on this platform
-				devices = context.getInfo<CL_CONTEXT_DEVICES>();
-
-			}
-			catch (Error error) {
-				std::cout << error.what() << "(" << error.err() << ")" << std::endl;
-				continue;
-			}
-
-			if (devices.size() > 0)
-				break;
-		}
-
-		if (devices.size() == 0) {
+		Context context;
+		if (!oclCreateContextBy(context, "nvidia")) {
 			throw Error(CL_INVALID_CONTEXT, "Failed to create a valid context!");
 		}
+
+		// Query devices from the context
+		vector<Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
 
 		// Create a command queue and use the first device
 		CommandQueue queue(context, devices[0], CL_QUEUE_PROFILING_ENABLE);
 
 		// Read source file
-		std::ifstream sourceFile("reduce_kernel.cl");
-		std::string sourceCode(
-			std::istreambuf_iterator<char>(sourceFile),
-			(std::istreambuf_iterator<char>()));
-		Program::Sources source(1, std::make_pair(sourceCode.c_str(), sourceCode.length() + 1));
+		auto sourceCode = oclReadSourcesFromFile("reduce_kernel.cl");
+		Program::Sources sources(1, std::make_pair(sourceCode.c_str(), sourceCode.length() + 1));
 
 		// Make program of the source code in the context
-		Program program(context, source);
+		Program program(context, sources);
 
 		// Build program for these specific devices
 		try {
 			program.build(devices);
 		}
 		catch (Error error) {
+			oclPrintError(error);
 			std::cerr << "Build Status: " << program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(devices[0]) << std::endl;
 			std::cerr << "Build Options:\t" << program.getBuildInfo<CL_PROGRAM_BUILD_OPTIONS>(devices[0]) << std::endl;
 			std::cerr << "Build Log:\t " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << std::endl;
@@ -84,14 +53,16 @@ int main() {
 		Kernel kernel(program, "reduce");
 #pragma endregion
 
-		for (unsigned size = 1 << 23; size <= 1 << 28; size = size << 1) {
+		for (unsigned size = 1 << 23; size <= 1 << 27; size = size << 1) {
 			std::vector<int> input(size);
 			std::default_random_engine rand(0);
 			std::generate(input.begin(), input.end(), [&] () {return rand() % 512 - 256; });
 
+			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
+
 #pragma region Execute kernel
 			// Create memory buffers
-			Buffer input_buffer(context, CL_MEM_READ_WRITE, size * sizeof(int));
+			Buffer input_buffer(context, CL_MEM_READ_ONLY, size * sizeof(int));
 			Buffer result_buffer(context, CL_MEM_READ_WRITE, sizeof(int));
 
 			int GPU_result = 0;
@@ -120,8 +91,7 @@ int main() {
 #pragma endregion
 
 			std::cout << time << std::endl;
-
-			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
+			
 			if (CPU_result != GPU_result) {
 				std::cerr << "computation error" << std::endl;
 				break;
@@ -130,7 +100,7 @@ int main() {
 
 	}
 	catch (Error error) {
-		std::cout << error.what() << "(" << error.err() << ")" << std::endl;
+		oclPrintError(error);
 	}
 
 	std::cin.get();
