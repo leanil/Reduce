@@ -1,17 +1,16 @@
-__kernel void reduce(__global int *input, __global int *result, __local int *scratch) {
+__kernel void reduce(__global int *input, const unsigned length, __global int *result, __local int *scratch) {
 
 	// each thread loads one element from global to local mem
 	int l_id = get_local_id(0);
 	int g_id = get_global_id(0);
-	scratch[l_id] = input[g_id];
-	result[g_id] = 0;
 
+	scratch[l_id] = g_id < length ? input[g_id] : 0;
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// do reduction in shared mem
-	for (int s = get_local_size(0) / 2; s > 0; s /= 2) {
-		if (l_id < s) {
-			scratch[l_id] += scratch[l_id + s];
+	for (int offset = get_local_size(0) / 2; offset > 0; offset /= 2) {
+		if (l_id < offset) {
+			scratch[l_id] += scratch[l_id + offset];
 		}
 		barrier(CLK_LOCAL_MEM_FENCE);
 	}

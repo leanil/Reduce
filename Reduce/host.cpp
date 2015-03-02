@@ -78,21 +78,26 @@ int main() {
 			const unsigned GROUP_SIZE = 128;
 
 			kernel_0.setArg(0, io_buffer_0);
-			kernel_0.setArg(1, io_buffer_1);
-			kernel_0.setArg(2, GROUP_SIZE * sizeof(int), nullptr);
+			kernel_0.setArg(2, io_buffer_1);
+			kernel_0.setArg(3, GROUP_SIZE * sizeof(int), nullptr);
 
 			kernel_1.setArg(0, io_buffer_1);
-			kernel_1.setArg(1, io_buffer_0);
-			kernel_1.setArg(2, GROUP_SIZE * sizeof(int), nullptr);
+			kernel_1.setArg(2, io_buffer_0);
+			kernel_1.setArg(3, GROUP_SIZE * sizeof(int), nullptr);
 
 			auto start = std::chrono::high_resolution_clock::now();
 
 			for (unsigned rem_size = size; rem_size > 1; rem_size = round_up_div(rem_size, GROUP_SIZE), ++round) {
 
+				if (round % 2 == 0) {
+					kernel_0.setArg(1, rem_size);
+				}
+				else {
+					kernel_1.setArg(1, rem_size);
+				}
 				// Run the kernel on specific ND range
-				int t1 = round_up_div(rem_size, GROUP_SIZE) * GROUP_SIZE;
 				queue.enqueueNDRangeKernel(round % 2 == 0 ? kernel_0 : kernel_1,
-					NullRange, t1, GROUP_SIZE);
+					NullRange, round_up_div(rem_size, GROUP_SIZE) * GROUP_SIZE, GROUP_SIZE);
 			}
 
 			queue.finish();
