@@ -14,70 +14,40 @@
 
 using namespace cl;
 
+#include <oclUtils.hpp>
+
 unsigned round_up_div(unsigned a, unsigned b) {
 	return static_cast<int>(ceil((double)a / b));
 }
 
 int main() {
+
 	try {
 #pragma region Initialize GPU
-		// Get available platforms
-		vector<Platform> platforms;
-		Platform::get(&platforms);
-
-		vector<Device> devices; // !
-		Context context; // !
-
-		// I prefer platforms with higher index
-		for (unsigned i = platforms.size() - 1; i >= 0; --i) {
-			try {
-				std::cout << platforms[i].getInfo<CL_PLATFORM_NAME>() << std::endl;
-				std::cout << platforms[i].getInfo<CL_PLATFORM_VERSION>() << std::endl;
-
-				// Select the default platform and create a context using this platform and the GPU
-				cl_context_properties cps[3] = {
-					CL_CONTEXT_PLATFORM,
-					(cl_context_properties)(platforms[i])(),
-					0
-				};
-
-				context = Context(CL_DEVICE_TYPE_GPU, cps);
-
-				// Get a list of devices on this platform
-				devices = context.getInfo<CL_CONTEXT_DEVICES>();
-
-			}
-			catch (Error error) {
-				std::cout << error.what() << "(" << error.err() << ")" << std::endl;
-				continue;
-			}
-
-			if (devices.size() > 0)
-				break;
-		}
-
-		if (devices.size() == 0) {
+		Context context;
+		if (!oclCreateContextBy(context, "nvidia")) {
 			throw Error(CL_INVALID_CONTEXT, "Failed to create a valid context!");
 		}
+
+		// Query devices from the context
+		vector<Device> devices = context.getInfo<CL_CONTEXT_DEVICES>();
 
 		// Create a command queue and use the first device
 		CommandQueue queue(context, devices[0], CL_QUEUE_PROFILING_ENABLE);
 
 		// Read source file
-		std::ifstream sourceFile("reduce_kernel.cl");
-		std::string sourceCode(
-			std::istreambuf_iterator<char>(sourceFile),
-			(std::istreambuf_iterator<char>()));
-		Program::Sources source(1, std::make_pair(sourceCode.c_str(), sourceCode.length() + 1));
+		auto sourceCode = oclReadSourcesFromFile("reduce_kernel.cl");
+		Program::Sources sources(1, std::make_pair(sourceCode.c_str(), sourceCode.length() + 1));
 
 		// Make program of the source code in the context
-		Program program(context, source);
+		Program program(context, sources);
 
 		// Build program for these specific devices
 		try {
 			program.build(devices);
 		}
 		catch (Error error) {
+			oclPrintError(error);
 			std::cerr << "Build Status: " << program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(devices[0]) << std::endl;
 			std::cerr << "Build Options:\t" << program.getBuildInfo<CL_PROGRAM_BUILD_OPTIONS>(devices[0]) << std::endl;
 			std::cerr << "Build Log:\t " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]) << std::endl;
@@ -117,7 +87,7 @@ int main() {
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (unsigned rem_size = size; rem_size > 1; rem_size = round_up_div(rem_size, GROUP_SIZE), ++round) {			
+			for (unsigned rem_size = size; rem_size > 1; rem_size = round_up_div(rem_size, GROUP_SIZE), ++round) {
 
 				// Run the kernel on specific ND range
 				int t1 = round_up_div(rem_size, GROUP_SIZE) * GROUP_SIZE;
@@ -144,7 +114,7 @@ int main() {
 
 	}
 	catch (Error error) {
-		std::cout << error.what() << "(" << error.err() << ")" << std::endl;
+		oclPrintError(error);
 	}
 
 	std::cin.get();
