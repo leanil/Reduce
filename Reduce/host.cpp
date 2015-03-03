@@ -55,7 +55,7 @@ int main() {
 		}
 
 		// Make kernel
-		Kernel kernel_0(program, "reduce"), kernel_1(program, "reduce");
+		Kernel stage_1(program, "hybrid_reduce"), stage_2(program, "parallel_reduce");
 #pragma endregion
 
 		for (unsigned size = 1 << 20; size <= 1 << 27; size = size << 1) {
@@ -66,31 +66,33 @@ int main() {
 			auto CPU_result = std::accumulate(input.begin(), input.end(), 0);
 
 #pragma region Execute kernel
+			const unsigned GROUP_SIZE = 256;
+
 			// Create memory buffers
-			Buffer io_buffer_0(context, CL_MEM_READ_WRITE, size * sizeof(int));
-			Buffer io_buffer_1(context, CL_MEM_READ_WRITE, size * sizeof(int));
+			Buffer input_buf(context, CL_MEM_READ_ONLY, size * sizeof(int));
+			Buffer io_buf(context, CL_MEM_READ_WRITE, GROUP_SIZE * sizeof(int));
+			Buffer result_buf(context, CL_MEM_WRITE_ONLY, sizeof(int));
 
 			// Copy input to the memory buffer
-			queue.enqueueWriteBuffer(io_buffer_0, CL_TRUE, 0, size * sizeof(int), input.data());
+			queue.enqueueWriteBuffer(input_buf, CL_TRUE, 0, size * sizeof(int), input.data());
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 
 			cl_ulong round = 0;
-			const unsigned GROUP_SIZE = 1024;
 
-			kernel_0.setArg(0, io_buffer_0);
-			kernel_0.setArg(2, io_buffer_1);
-			kernel_0.setArg(3, GROUP_SIZE * sizeof(int), nullptr);
+			stage_1.setArg(0, input_buf);
+			stage_1.setArg(1, size);
+			stage_1.setArg(2, io_buf);
+			stage_1.setArg(3, GROUP_SIZE * sizeof(int), nullptr);
 
-			kernel_1.setArg(0, io_buffer_1);
-			kernel_1.setArg(2, io_buffer_0);
-			kernel_1.setArg(3, GROUP_SIZE * sizeof(int), nullptr);
+			stage_2.setArg(0, io_buf);
+			stage_2.setArg(1, result_buf);
+			stage_2.setArg(2, GROUP_SIZE * sizeof(int), nullptr);
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			kernel_0.setArg(1, size);
-
 			// Run the kernel on specific ND range
-			queue.enqueueNDRangeKernel(kernel_0, NullRange, GROUP_SIZE, GROUP_SIZE);
+			queue.enqueueNDRangeKernel(stage_1, NullRange, GROUP_SIZE * GROUP_SIZE, GROUP_SIZE);
+			queue.enqueueNDRangeKernel(stage_2, NullRange, GROUP_SIZE, GROUP_SIZE);
 
 			queue.finish();
 			auto stop = std::chrono::high_resolution_clock::now();
@@ -98,7 +100,7 @@ int main() {
 
 			// Read buffer into a local variable
 			int GPU_result;
-			queue.enqueueReadBuffer(io_buffer_1, CL_TRUE, 0, sizeof(int), &GPU_result);
+			queue.enqueueReadBuffer(result_buf, CL_TRUE, 0, sizeof(int), &GPU_result);
 			queue.finish(); // NEW: Ez néhány platformon lehet hogy megold egy biz. problémát
 #pragma endregion
 
